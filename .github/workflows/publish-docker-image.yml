@@ -27,21 +27,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 3. 提取元数据（镜像名称和标签）
-      #    ★★★ 最终修复 ★★★
-      #    使用 GitHub Actions 内置的 toLowerCase() 函数来转换仓库名称
+      # 3. ★★★ 核心修复：创建一个小写的仓库名称变量 ★★★
+      #    完全遵照您提供的可靠模式。
+      - name: Convert repository name to lowercase
+        id: repo_lowercase # 给这个步骤一个ID，方便后面引用它的输出
+        # 使用最通用的 `tr` 命令来确保转换成功
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      # 4. 提取元数据（镜像名称和标签）
+      #    现在使用上一步生成的小写变量，确保镜像名称完全合法
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ toLowerCase(github.repository) }}
+          # 使用 `steps.repo_lowercase.outputs.name` 来引用上一步的结果
+          images: ghcr.io/${{ steps.repo_lowercase.outputs.name }}
 
-      # 4. 构建并推送到 GHCR
+      # 5. 构建并推送到 GHCR
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          # 使用上一步生成的、基于小写名称的正确标签
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
