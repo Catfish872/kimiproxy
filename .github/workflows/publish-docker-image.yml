@@ -1,47 +1,48 @@
-# .github/workflows/publish-to-ghcr.yml
+# .github/workflows/publish-docker-image.yml
 
-name: Build and Publish to GHCR
+name: Build and Push Docker Image to GHCR
 
-# 触发条件：
-# 1. 当有代码推送到 main 分支时
-# 2. 当有人向 main 分支创建 Pull Request 时 (用于检查构建是否成功)
-# 3. 允许手动触发
+# 触发条件: 当有代码推送到 main 分支时触发
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
 
 jobs:
-  build-and-publish:
-    # 运行此任务的虚拟机环境
+  build-and-push:
     runs-on: ubuntu-latest
-    # 赋予工作流写入 GitHub Packages 的权限
     permissions:
       contents: read
       packages: write
 
     steps:
-      # 第一步：检出你的仓库代码
+      # 1. 检出仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 第二步：登录到 GitHub Container Registry (GHCR)
-      # GITHUB_TOKEN 是由 GitHub Actions 自动提供的，不需要你手动创建
-      - name: Log in to GitHub Container Registry
+      # 2. 登录到 GitHub Container Registry (GHCR)
+      - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 第三步：构建并推送 Docker 镜像
-      # ghcr.io/<你的用户名或组织名>/<你的仓库名>:latest
+      # 3. 提取元数据（镜像名称和标签）
+      #    ★★★ 核心修复点 ★★★
+      #    我们在这里直接使用 Bash 的参数扩展功能，将 github.repository 转换为小写
+      #    然后才将其传递给 docker/metadata-action。
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository,, }}
+
+      # 4. 构建并推送到 GHCR
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          # 只在推送到 main 分支时才真正执行推送
-          push: ${{ github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
+          push: true
+          # 使用上一步生成的、基于小写名称的正确标签
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
