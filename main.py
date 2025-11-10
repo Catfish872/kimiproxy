@@ -1,4 +1,3 @@
-python
 import logging
 import json
 import httpx  # 使用 httpx 替代 requests，因为它对异步和代理更友好
@@ -110,4 +109,5 @@ def read_root():
 
 @app.get("/health")
 def health_check():
+
     return {"status": "healthy"}
