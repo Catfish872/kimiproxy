@@ -1,14 +1,14 @@
+# main.py (最终正确、严格遵循 OpenAI 规范的版本)
+
 import logging
 import json
-import httpx  # 使用 httpx 替代 requests，因为它对异步和代理更友好
-from fastapi import FastAPI, Request, Response
+import httpx
+from fastapi import FastAPI, Request, Response, APIRouter
 from fastapi.responses import StreamingResponse
 
 # --- 配置 ---
-# Kimi API 的基础 URL
 KIMI_API_BASE_URL = "https://api.kimi.com/coding"
-# 我们伪造的 User-Agent
-# 这里硬编码一个已知可用的版本，避免了动态获取的复杂性
+KIMI_MODEL_NAME = "kimi-for-coding"
 USER_AGENT = "KimiCLI/0.2.0"
 
 # --- 日志设置 ---
@@ -17,97 +17,100 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- FastAPI 应用实例 ---
 app = FastAPI(
     title="Kimi API OpenAI Proxy",
-    description="A lightweight proxy to add the correct User-Agent for Kimi API, making it compatible with any OpenAI client.",
-    version="1.0.0"
+    description="An OpenAI-compatible API for Kimi API.",
+    version="1.1.0"
 )
 
+# --- 创建一个 /v1 路由 ---
+# 这样可以确保所有路径都严格符合 OpenAI 的 /v1/.. 规范
+router_v1 = APIRouter(prefix="/v1")
 
-# --- 核心代理逻辑 ---
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def reverse_proxy(request: Request, path: str):
-    """
-    这是一个通用的反向代理端点，它会捕获所有请求。
-    """
-    # 1. 构造目标 URL
-    target_url = f"{KIMI_API_BASE_URL}/{path}"
 
-    # 2. 复制原始请求的 Headers，并添加/修改 User-Agent
+# --- 实现 /v1/models 端点 ---
+@router_v1.get("/models")
+async def list_models():
+    """
+    严格按照 OpenAI 规范，返回模型列表。
+    只包含我们代理的 Kimi 模型。
+    """
+    model_data = {
+        "object": "list",
+        "data": [
+            {
+                "id": KIMI_MODEL_NAME,
+                "object": "model",
+                "created": 1677610602,
+                "owned_by": "moonshot-ai",
+            }
+        ],
+    }
+    return model_data
+
+
+# --- 实现 /v1/chat/completions 端点 ---
+@router_v1.post("/chat/completions")
+async def chat_completions(request: Request):
+    """
+    严格按照 OpenAI 规范，处理聊天请求。
+    这个函数会调用我们成功的伪装路由。
+    """
+    target_url = f"{KIMI_API_BASE_URL}/v1/chat/completions"
+
+    # 复制客户端发来的 headers，并强制替换 User-Agent
     headers = dict(request.headers)
     headers["User-Agent"] = USER_AGENT
-    # Host header 需要指向目标服务器
     headers["host"] = "api.kimi.com"
-
-    # 移除在转发时可能引起问题的 headers
     headers.pop("content-length", None)
     headers.pop("transfer-encoding", None)
+    headers.pop("connection", None)
 
-    # 3. 获取请求体
     body = await request.body()
 
-    # 4. 使用 httpx 客户端发起异步请求
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         try:
-            # 发起请求，注意 stream=True 用于处理流式响应
             proxied_request = client.build_request(
-                method=request.method,
+                method="POST",
                 url=target_url,
                 headers=headers,
-                params=request.query_params,
                 content=body
             )
 
-            logging.info(f"Proxying request: {request.method} {target_url}")
+            logging.info(f"Proxying to: {target_url}")
 
-            # 发送请求并获取流式响应
             proxied_response = await client.send(proxied_request, stream=True)
 
-            # 检查是否为 SSE (Server-Sent Events) 流式响应
-            is_sse = proxied_response.headers.get('content-type', '').lower() == 'text/event-stream'
-
-            if is_sse:
-                # 如果是 SSE，我们以流的方式返回
-                async def stream_generator():
-                    async for chunk in proxied_response.aiter_bytes():
-                        yield chunk
-
-                # 复制原始响应的 headers
-                response_headers = dict(proxied_response.headers)
-                response_headers.pop("content-encoding", None)  # Let FastAPI handle encoding
-
+            if 'text/event-stream' in proxied_response.headers.get('content-type', ''):
                 return StreamingResponse(
-                    stream_generator(),
+                    proxied_response.aiter_bytes(),
                     status_code=proxied_response.status_code,
-                    headers=response_headers
+                    headers=dict(proxied_response.headers)
                 )
             else:
-                # 如果是普通响应，一次性读取并返回
                 response_body = await proxied_response.aread()
-
-                response_headers = dict(proxied_response.headers)
-                response_headers.pop("content-encoding", None)
-
                 return Response(
                     content=response_body,
                     status_code=proxied_response.status_code,
-                    headers=response_headers
+                    headers=dict(proxied_response.headers)
                 )
 
         except httpx.RequestError as e:
-            error_message = f"Error proxying request to Kimi API: {e}"
-            logging.error(error_message)
+            logging.error(f"Proxying error: {e}")
             return Response(
-                content=json.dumps({"error": {"message": error_message, "type": "proxy_error"}}),
-                status_code=502  # Bad Gateway
+                content=json.dumps({"error": {"message": str(e), "type": "proxy_error"}}),
+                status_code=502
             )
 
 
-# --- 根路径和健康检查 ---
-@app.get("/")
-def read_root():
-    return {"message": "Kimi API Proxy is running. Point your OpenAI client to this server's URL."}
+# 将 /v1 路由注册到主应用
+app.include_router(router_v1)
 
 
+# --- 健康检查和根路径 ---
 @app.get("/health")
 def health_check():
-
     return {"status": "healthy"}
+
+
+@app.get("/")
+def read_root():
+    return {"message": "Kimi API Proxy is running. Use /v1/models and /v1/chat/completions endpoints."}
