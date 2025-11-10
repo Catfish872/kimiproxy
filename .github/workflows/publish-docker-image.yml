@@ -1,38 +1,47 @@
-# .github/workflows/publish-docker-image.yml
+# .github/workflows/publish-to-ghcr.yml
 
-name: Build and Push Docker Image
+name: Build and Publish to GHCR
 
-# 触发条件：当有代码推送到 main 分支时触发
+# 触发条件：
+# 1. 当有代码推送到 main 分支时
+# 2. 当有人向 main 分支创建 Pull Request 时 (用于检查构建是否成功)
+# 3. 允许手动触发
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
-  build-and-push:
+  build-and-publish:
     # 运行此任务的虚拟机环境
     runs-on: ubuntu-latest
+    # 赋予工作流写入 GitHub Packages 的权限
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-      # 第一步：检出代码
-      # 把你的仓库代码下载到虚拟机上
+      # 第一步：检出你的仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 第二步：登录到 Docker Hub
-      # 你需要先在 GitHub 仓库的 Settings -> Secrets and variables -> Actions 中
-      # 创建两个名为 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN 的仓库密钥
-      - name: Log in to Docker Hub
+      # 第二步：登录到 GitHub Container Registry (GHCR)
+      # GITHUB_TOKEN 是由 GitHub Actions 自动提供的，不需要你手动创建
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # 第三步：构建并推送 Docker 镜像
-      # 这个步骤会使用你项目根目录下的 Dockerfile
+      # ghcr.io/<你的用户名或组织名>/<你的仓库名>:latest
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
-          # 给你的镜像打上标签，例如 your-username/kimiproxy:latest
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/kimiproxy:latest
+          # 只在推送到 main 分支时才真正执行推送
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
