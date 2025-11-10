@@ -33,15 +33,17 @@ jobs:
         run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       # 4. 提取元数据（镜像名称和标签）
-      #    使用上一步生成的小写变量，并同时生成 'main' 和 'latest' 标签
+      #    这是经过验证的、可以同时生成 branch 和 latest 标签的正确写法
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ steps.repo_lowercase.outputs.name }}
           tags: |
-            type=edge,branch=main
-            latest=true
+            # 为当前事件生成标签 (例如 'main' 用于推送到 main 分支)
+            type=ref,event=branch
+            # 仅当事件是推送到 main 分支时，才添加 'latest' 标签
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       # 5. 构建并推送到 GHCR
       - name: Build and push Docker image
