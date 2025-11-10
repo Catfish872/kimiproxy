@@ -27,18 +27,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 3. 提取元数据（镜像名称和标签）
-      #    这将为 main 分支同时生成 'main' 和 'latest' 两个标签
+      # 3. 创建一个小写的仓库名称变量
+      - name: Convert repository name to lowercase
+        id: repo_lowercase
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      # 4. 提取元数据（镜像名称和标签）
+      #    使用上一步生成的小写变量，并同时生成 'main' 和 'latest' 标签
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ toLowerCase(github.repository) }}
+          images: ghcr.io/${{ steps.repo_lowercase.outputs.name }}
           tags: |
             type=edge,branch=main
             latest=true
 
-      # 4. 构建并推送到 GHCR
+      # 5. 构建并推送到 GHCR
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
