@@ -28,14 +28,13 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # 3. 提取元数据（镜像名称和标签）
-      #    ★★★ 核心修复点 ★★★
-      #    我们在这里直接使用 Bash 的参数扩展功能，将 github.repository 转换为小写
-      #    然后才将其传递给 docker/metadata-action。
+      #    ★★★ 最终修复 ★★★
+      #    使用 GitHub Actions 内置的 toLowerCase() 函数来转换仓库名称
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository,, }}
+          images: ghcr.io/${{ toLowerCase(github.repository) }}
 
       # 4. 构建并推送到 GHCR
       - name: Build and push Docker image
