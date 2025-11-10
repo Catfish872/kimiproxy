@@ -1,48 +1,14 @@
-# .github/workflows/publish-docker-image.yml
+# docker-compose.yml
 
-name: Build and Push Docker Image to GHCR
-
-# 触发条件: 当有代码推送到 main 分支时触发
-on:
-  push:
-    branches: [ "main" ]
-
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      # 1. 检出仓库代码
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # 2. 登录到 GitHub Container Registry (GHCR)
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # 3. 提取元数据（镜像名称和标签）
-      #    这将为 main 分支同时生成 'main' 和 'latest' 两个标签
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ toLowerCase(github.repository) }}
-          tags: |
-            type=edge,branch=main
-            latest=true
-
-      # 4. 构建并推送到 GHCR
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+services:
+  kimiproxy:
+    # 优先使用 GHCR 上的镜像，并默认使用 'latest' 标签
+    image: ghcr.io/catfish872/kimiproxy:latest
+    # build 指令作为备用，供需要在本地构建的用户使用
+    # 当运行 `docker compose up --build` 时，它会覆盖 image 指令并进行本地构建
+    build:
+      context: .
+    container_name: kimiproxy-service
+    ports:
+      - "11435:11435"
+    restart: unless-stopped
