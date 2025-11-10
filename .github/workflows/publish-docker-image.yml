@@ -1,0 +1,38 @@
+# .github/workflows/publish-docker-image.yml
+
+name: Build and Push Docker Image
+
+# 触发条件：当有代码推送到 main 分支时触发
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-push:
+    # 运行此任务的虚拟机环境
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第一步：检出代码
+      # 把你的仓库代码下载到虚拟机上
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 第二步：登录到 Docker Hub
+      # 你需要先在 GitHub 仓库的 Settings -> Secrets and variables -> Actions 中
+      # 创建两个名为 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN 的仓库密钥
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 第三步：构建并推送 Docker 镜像
+      # 这个步骤会使用你项目根目录下的 Dockerfile
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # 给你的镜像打上标签，例如 your-username/kimiproxy:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/kimiproxy:latest
