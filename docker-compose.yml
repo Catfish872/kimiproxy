@@ -1,0 +1,22 @@
+# 使用 Docker Compose v3.8 语法
+version: '3.8'
+
+# 定义服务
+services:
+  # 服务的名称，可以自定义
+  kimiproxy:
+    # 构建指令：
+    # context: . 表示使用当前目录下的 Dockerfile 进行构建
+    build:
+      context: .
+    # 给运行的容器起一个固定的名字，方便管理
+    container_name: kimiproxy-service
+    # 端口映射：
+    # 将主机的 11435 端口映射到容器的 11435 端口
+    # 格式是 "主机端口:容器端口"
+    ports:
+      - "11435:11435"
+    # 重启策略：
+    # unless-stopped 表示除非手动停止容器，否则容器总是在退出后自动重启
+    # 这让服务在服务器重启后也能自动恢复
+    restart: unless-stopped
