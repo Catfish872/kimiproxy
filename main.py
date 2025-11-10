@@ -1,4 +1,4 @@
-# main.py (最终正确、严格遵循 OpenAI 规范的版本)
+# main.py (v9.2.0 生产优化版)
 
 import logging
 import json
@@ -7,8 +7,8 @@ from fastapi import FastAPI, Request, Response, APIRouter
 from fastapi.responses import StreamingResponse
 
 # --- 配置 ---
+# ★★★★★ 核心原则：严格遵守用户指定的上游 URL ★★★★★
 KIMI_API_BASE_URL = "https://api.kimi.com/coding"
-KIMI_MODEL_NAME = "kimi-for-coding"
 USER_AGENT = "KimiCLI/0.2.0"
 
 # --- 日志设置 ---
@@ -17,100 +17,124 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- FastAPI 应用实例 ---
 app = FastAPI(
     title="Kimi API OpenAI Proxy",
-    description="An OpenAI-compatible API for Kimi API.",
-    version="1.1.0"
+    description="An absolutely transparent proxy. It unconditionally forwards the model specified by the client to the designated upstream URL.",
+    version="9.2.0"  # 版本号迭进
 )
 
-# --- 创建一个 /v1 路由 ---
-# 这样可以确保所有路径都严格符合 OpenAI 的 /v1/.. 规范
+# --- 创建 /v1 路由 ---
 router_v1 = APIRouter(prefix="/v1")
 
 
-# --- 实现 /v1/models 端点 ---
+async def stream_proxy_handler(target_url: str, headers: dict, body: bytes):
+    """
+    一个透明的字节流代理。它从上游获取所有数据块并立即转发给客户端。
+    这种设计天然支持所有SSE（Server-Sent Events）负载，包括常规内容、思维链、工具调用等。
+    """
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        try:
+            async with client.stream("POST", target_url, headers=headers, content=body) as response:
+                if response.status_code != 200:
+                    error_content = await response.aread()
+                    logging.error(
+                        f"Upstream server returned an error: {response.status_code} - {error_content.decode()}")
+                    yield json.dumps({"error": {
+                        "message": f"Kimi API Error: {response.status_code} - {error_content.decode()}",
+                        "type": "upstream_error"}}).encode('utf-8')
+                    return
+
+                # ★★★★★ 修改(1)：移除调试日志 ★★★★★
+                # 原始的调试日志已被移除，使生产环境日志更清洁。
+                # try/except 块仍然保留，以防止潜在的解码错误（虽然我们不再打印）。
+                async for chunk in response.aiter_bytes():
+                    try:
+                        # 仅在需要深度调试时取消注释以下行
+                        # chunk_text = chunk.decode('utf-8').strip()
+                        # if chunk_text:
+                        #     logging.info(f"[RAW CHUNK]: {chunk_text}")
+                        pass
+                    except:
+                        pass
+                    yield chunk
+        except httpx.RequestError as e:
+            logging.error(f"Streaming proxy error: {e.__class__.__name__} - {e}")
+            yield json.dumps({"error": {"message": f"Proxy request failed: {str(e)}", "type": "proxy_error"}}).encode(
+                'utf-8')
+
+
+@router_v1.post("/chat/completions")
+async def chat_completions(request: Request):
+    target_url = f"{KIMI_API_BASE_URL}/v1/chat/completions"
+
+    body = await request.body()
+    is_stream = False
+
+    # --- 智能模式切换逻辑 ---
+    try:
+        request_data = json.loads(body)
+        is_stream = request_data.get("stream", False)
+
+        # 检查是否使用了我们定义的虚拟 "thinking" 模型
+        if request_data.get("model") == "kimi-for-coding-thinking":
+            logging.info("Virtual model 'kimi-for-coding-thinking' detected. Enabling thinking mode.")
+            request_data["thinking"] = True
+            request_data["model"] = "kimi-for-coding"
+            body = json.dumps(request_data).encode('utf-8')
+            logging.info(f"Modified request body for upstream: {body.decode('utf-8')}")
+
+    except json.JSONDecodeError:
+        logging.warning("Received a request with a non-JSON body. Passing through without modification.")
+        pass
+
+    headers_to_forward = dict(request.headers)
+    headers_to_forward["host"] = "api.kimi.com"
+    headers_to_forward["user-agent"] = USER_AGENT
+    headers_to_forward.pop("content-length", None)
+    headers_to_forward.pop("transfer-encoding", None)
+    headers_to_forward["connection"] = "close"
+
+    if is_stream:
+        response_headers = {"Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache",
+                            "Connection": "keep-alive"}
+        return StreamingResponse(stream_proxy_handler(target_url, headers_to_forward, body), headers=response_headers,
+                                 media_type="text/event-stream")
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                proxied_response = await client.post(url=target_url, headers=headers_to_forward, content=body)
+            response_headers = dict(proxied_response.headers)
+            response_headers.pop("content-length", None)
+            response_headers.pop("content-encoding", None)
+            response_headers.pop("transfer-encoding", None)
+            response_headers.pop("connection", None)
+            return Response(content=proxied_response.content, status_code=proxied_response.status_code,
+                            headers=response_headers)
+        except httpx.RequestError as e:
+            logging.error(f"Non-streaming proxy error: {e.__class__.__name__} - {e}")
+            return Response(content=json.dumps({"error": {"message": str(e), "type": "proxy_error"}}), status_code=502)
+
+
+# ★★★★★ 核心原则：/v1/models 只是一个给客户端UI看的、非限制性的“便利贴” ★★★★★
 @router_v1.get("/models")
 async def list_models():
     """
-    严格按照 OpenAI 规范，返回模型列表。
-    只包含我们代理的 Kimi 模型。
+    Provides a comprehensive list of potential models to the client UI.
+    This list DOES NOT restrict which model can be used in the completions endpoint.
+    It's a convenience feature for model selection in UIs like ChatBox.
     """
-    model_data = {
+    return {
         "object": "list",
         "data": [
-            {
-                "id": KIMI_MODEL_NAME,
-                "object": "model",
-                "created": 1677610602,
-                "owned_by": "moonshot-ai",
-            }
-        ],
+            {"id": "kimi-for-coding", "object": "model", "owned_by": "moonshot-ai"},
+            {"id": "kimi-for-coding-thinking", "object": "model", "owned_by": "moonshot-ai"},
+        ]
     }
-    return model_data
-
-
-# --- 实现 /v1/chat/completions 端点 ---
-@router_v1.post("/chat/completions")
-async def chat_completions(request: Request):
-    """
-    严格按照 OpenAI 规范，处理聊天请求。
-    这个函数会调用我们成功的伪装路由。
-    """
-    target_url = f"{KIMI_API_BASE_URL}/v1/chat/completions"
-
-    # 复制客户端发来的 headers，并强制替换 User-Agent
-    headers = dict(request.headers)
-    headers["User-Agent"] = USER_AGENT
-    headers["host"] = "api.kimi.com"
-    headers.pop("content-length", None)
-    headers.pop("transfer-encoding", None)
-    headers.pop("connection", None)
-
-    body = await request.body()
-
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        try:
-            proxied_request = client.build_request(
-                method="POST",
-                url=target_url,
-                headers=headers,
-                content=body
-            )
-
-            logging.info(f"Proxying to: {target_url}")
-
-            proxied_response = await client.send(proxied_request, stream=True)
-
-            if 'text/event-stream' in proxied_response.headers.get('content-type', ''):
-                return StreamingResponse(
-                    proxied_response.aiter_bytes(),
-                    status_code=proxied_response.status_code,
-                    headers=dict(proxied_response.headers)
-                )
-            else:
-                response_body = await proxied_response.aread()
-                return Response(
-                    content=response_body,
-                    status_code=proxied_response.status_code,
-                    headers=dict(proxied_response.headers)
-                )
-
-        except httpx.RequestError as e:
-            logging.error(f"Proxying error: {e}")
-            return Response(
-                content=json.dumps({"error": {"message": str(e), "type": "proxy_error"}}),
-                status_code=502
-            )
 
 
 # 将 /v1 路由注册到主应用
 app.include_router(router_v1)
 
 
-# --- 健康检查和根路径 ---
-@app.get("/health")
-def health_check():
-    return {"status": "healthy"}
-
-
+# --- 根路径 (用于简单验证) ---
 @app.get("/")
 def read_root():
-    return {"message": "Kimi API Proxy is running. Use /v1/models and /v1/chat/completions endpoints."}
+    return {"status": "running"}
