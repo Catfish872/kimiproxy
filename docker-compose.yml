@@ -1,22 +1,48 @@
-# 使用 Docker Compose v3.8 语法
-version: '3.8'
+# .github/workflows/publish-docker-image.yml
 
-# 定义服务
-services:
-  # 服务的名称，可以自定义
-  kimiproxy:
-    # 构建指令：
-    # context: . 表示使用当前目录下的 Dockerfile 进行构建
-    build:
-      context: .
-    # 给运行的容器起一个固定的名字，方便管理
-    container_name: kimiproxy-service
-    # 端口映射：
-    # 将主机的 11435 端口映射到容器的 11435 端口
-    # 格式是 "主机端口:容器端口"
-    ports:
-      - "11435:11435"
-    # 重启策略：
-    # unless-stopped 表示除非手动停止容器，否则容器总是在退出后自动重启
-    # 这让服务在服务器重启后也能自动恢复
-    restart: unless-stopped
+name: Build and Push Docker Image to GHCR
+
+# 触发条件: 当有代码推送到 main 分支时触发
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # 1. 检出仓库代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 登录到 GitHub Container Registry (GHCR)
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 3. 提取元数据（镜像名称和标签）
+      #    这将为 main 分支同时生成 'main' 和 'latest' 两个标签
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ toLowerCase(github.repository) }}
+          tags: |
+            type=edge,branch=main
+            latest=true
+
+      # 4. 构建并推送到 GHCR
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
