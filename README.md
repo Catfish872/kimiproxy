@@ -10,14 +10,13 @@
 
 - **OpenAI 格式兼容**: 完全兼容 OpenAI 的 `/v1/chat/completions` 和 `/v1/models` API 接口。
 - **透明代理**: 无条件转发客户端指定的模型参数，不进行任何限制。
-- **增强的“思维链”模式**: 内置虚拟模型 `kimi-for-coding-thinking`，选择此模型即可自动启用 Kimi API 的 `thinking` 模式，观察模型的思考过程。
-- **流式与非流式支持**: 完美支持流式（Server-Sent Events）和非流式两种响应模式。
+- **流式与非流式支持**: 支持流式（Server-Sent Events）和非流式两种响应模式。
 - **部署简单**: 提供 Docker 和 Docker Compose 配置，支持一键式服务器部署，同时也支持传统的本地 Python 环境部署。
 - **高性能**: 基于 FastAPI 和 httpx 构建，提供高性能的异步处理能力。
 
 ## API 密钥获取
 
-要使用此代理，您需要一个有效的 Kimi API 密钥。
+要使用此代理，您需要一个有效的 Kimi For Coding API Key 密钥。
 
 1.  访问 Kimi 官方网站并登录您的账户。
 2.  打开 [Kimi 会员计划页面](https://www.kimi.com/membership/pricing)。
