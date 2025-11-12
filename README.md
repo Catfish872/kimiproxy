@@ -38,8 +38,8 @@
 
 1.  克隆本仓库到您的服务器：
     ```bash
-    git clone <your-repo-url>
-    cd <your-repo-directory>
+    git clone https://github.com/Catfish872/kimiproxy.git
+    cd kimiproxy
     ```
 
 2.  在项目根目录下，使用 Docker Compose 一键启动服务：
@@ -62,8 +62,8 @@
 
 1.  克隆本仓库：
     ```bash
-    git clone <your-repo-url>
-    cd <your-repo-directory>
+    git clone https://github.com/Catfish872/kimiproxy.git
+    cd kimiproxy
     ```
 
 2.  创建并激活虚拟环境 (推荐):
